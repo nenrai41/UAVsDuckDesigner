@@ -1,0 +1,358 @@
+﻿using System;
+using Python.Runtime;
+
+namespace UAVsDuckDesigner
+{
+    public class PythonAeroSandboxRunner
+    {
+        private static PythonAeroSandboxRunner instance;
+
+        private PythonAeroSandboxRunner()
+        {
+            InitializePython();
+        }
+
+        public static PythonAeroSandboxRunner GetInstance()
+        {
+            if (instance == null)
+            {
+                instance = new PythonAeroSandboxRunner();
+            }
+            return instance;
+        }
+
+        // Инициализация Python.NET
+        private void InitializePython()
+        {
+            if (!PythonEngine.IsInitialized)
+            {
+                Runtime.PythonDLL = @"C:\Users\" + Environment.UserName + @"\AppData\Local\Programs\Python\Python311\python311.dll";
+                PythonEngine.Initialize();
+            }
+        }
+
+        private dynamic np;
+        private dynamic asb;
+        private dynamic pyBuiltins;
+        private dynamic plt;
+        private dynamic scipy;
+
+        private bool IsModulesOpen = false;
+
+        private void ImportModules()
+        {
+            if (!IsModulesOpen)
+            {
+                np = Py.Import("numpy");
+                asb = Py.Import("aerosandbox");
+                pyBuiltins = Py.Import("builtins");
+                plt = Py.Import("matplotlib.pyplot");
+                scipy = Py.Import("scipy.integrate");
+                IsModulesOpen = true;
+            }
+            
+        }
+        private void CloseModules()
+        {
+            if (IsModulesOpen)
+            {
+                np.Dispose();      // Закрываем модуль numpy
+                asb.Dispose();     // Закрываем aerosandbox
+                plt.Dispose();     // Закрываем matplotlib.pyplot
+                scipy.Dispose();   // Закрываем scipy.integrate
+                pyBuiltins.Dispose(); // Закрываем builtins
+
+                np = null;
+                asb = null;
+                plt = null;
+                scipy = null;
+                pyBuiltins = null;
+
+                GC.Collect(); // Принудительный вызов сборщика мусора
+                GC.WaitForPendingFinalizers(); // Ожидаем завершения финализации
+
+                IsModulesOpen = false;
+            }
+           
+        }
+        public double GetOfCl(string nameOfProfile, double alpha = 0, double reynoldsNumber = 300000, double machNumber = 0.2)
+        {
+            try
+            {
+                // Импорт модулей
+                ImportModules();
+                
+                dynamic airfoil = asb.Airfoil(name: nameOfProfile);
+
+                // Параметры анализа
+                double _alpha = alpha;                                 // углы атаки 0 градусов
+                double _reynoldsNumber = reynoldsNumber;               // число Рейнольдса
+                double _machNumber = machNumber;                       // число Маха
+
+                // Получаем характеристики профиля
+                dynamic neuralfoil = airfoil.get_aero_from_neuralfoil(
+                    alpha: _alpha,
+                    Re: _reynoldsNumber,
+                    mach: _machNumber
+                );
+                if (neuralfoil != null && neuralfoil != 0)
+                {
+                    CloseModules();
+                    return (double)neuralfoil["CL"];
+                }
+                else
+                {
+                    CloseModules();
+                    throw new Exception();
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка при работе с AeroSandbox: {ex.Message}");
+                if (ex.InnerException != null)
+                {
+                    MessageBox.Show($"Внутреннее исключение: {ex.InnerException.Message}");
+                    return 0;
+                }
+                return 0;
+            }
+
+        }
+
+        // Основной метод для создания и визуализации модели 
+        public void CreateAndVisualizeAircraft(DataResults results)
+        {
+            using (Py.GIL())
+            {
+                try
+                {
+                    // Импорт модулей
+                    ImportModules();
+                    //dynamic np = Py.Import("numpy");
+                    //dynamic asb = Py.Import("aerosandbox");
+                    //dynamic pyBuiltins = Py.Import("builtins");
+                    //dynamic plt = Py.Import("matplotlib.pyplot");
+                    //dynamic scipy = Py.Import("scipy.integrate");
+
+                    // Создание профиля крыла
+                    dynamic airfoilMainWing = asb.Airfoil(name: results.ProfileOfWingName);
+                    dynamic airfoilControlWing = asb.Airfoil(name: results.ProfileOfControlName);
+
+                    // Создание крыльев на основе расчетных данных
+                    dynamic mainWing = CreateMainWing(asb, np, pyBuiltins, airfoilMainWing, results);
+                    dynamic controlSurface = CreateControlSurface(asb, np, pyBuiltins, airfoilControlWing, results);
+
+                    // Создание фюзеляжа на основе расчетных данных
+                    dynamic fuselage = CreateFuselage(asb, np, pyBuiltins, results);
+
+                    // Создание списков крыльев и фюзеляжей
+                    dynamic wings = pyBuiltins.list();
+                    wings.append(mainWing);
+                    wings.append(controlSurface);
+
+                    dynamic fuselages = pyBuiltins.list();
+                    fuselages.append(fuselage);
+
+                    // Создание объекта ЛА
+                    dynamic airplane = asb.Airplane(
+                        name: "UAV Model",
+                        xyz_ref: np.array(new[] { 0.0, 0.0, 0.0 }.ToPython()),
+                        wings: wings,
+                        fuselages: fuselages
+                    );
+                    results.UAVs = airplane;
+
+                    // Визуализация модели
+                    airplane.draw();
+
+                    // Создание точки эксплуатации с заданной скоростью
+                    dynamic op_point = asb.OperatingPoint(
+                        velocity: results.Speed,  // Используем скорость из результатов
+                        alpha: 3.0,  // Угол атаки можно настроить
+                        beta: 0.0    // Угол скольжения
+                    );
+
+                    // Аэродинамический расчет
+                    dynamic vlm = asb.VortexLatticeMethod(airplane: airplane, op_point: op_point);
+                    dynamic aero_data = vlm.run();
+                    results.CD = aero_data["CD"];
+                    results.CL = aero_data["CL"];
+                    results.AerodynamicCenterOfControl = airplane.wings[1].aerodynamic_center()[0];
+
+
+                    // Вывод результатов аэродинамического расчета
+                    //Console.WriteLine($"Аэродинамические коэффициенты:");
+                    //Console.WriteLine($"CL = {aero_data["CL"]}");
+                    //Console.WriteLine($"CD = {aero_data["CD"]}");
+
+                    // Визуализация аэродинамической модели
+                    //vlm.draw();
+                    CloseModules();
+
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Ошибка при работе с AeroSandbox: {ex.Message}");
+                    CloseModules();
+                    if (ex.InnerException != null)
+                    {
+                        MessageBox.Show($"Внутреннее исключение: {ex.InnerException.Message}");
+                    }
+                }
+            }
+        }
+
+        // Создание основного крыла на основе расчетных данных
+        private dynamic CreateMainWing(dynamic asb, dynamic np, dynamic pyBuiltins, dynamic airfoil, DataResults results)
+        {
+            dynamic xsecs = pyBuiltins.list();
+
+            // Корневое сечение
+            dynamic root_section = asb.WingXSec(
+                xyz_le: np.array(new[] { results.WingPosition, 0.0, 0.0 }.ToPython()),
+                chord: results.Chord_Wing,
+                twist: 2.0,  // Угол можно настроить
+                airfoil: airfoil
+            );
+
+            // Концевое сечение
+            dynamic tip_section = asb.WingXSec(
+                    xyz_le: np.array(new[] { results.WingPosition, results.WingSpan / 2, 0.0 }.ToPython()),
+                    chord: results.Chord_Wing * 0.7,  // Сужение к концу крыла
+                    twist: 0.0,  // Угол можно настроить
+                    airfoil: airfoil
+                );
+
+            xsecs.append(root_section);
+            xsecs.append(tip_section);
+
+            // Создание крыла
+            return asb.Wing(
+                name: "Main Wing",
+                xyz_le: np.array(new[] { results.WingPosition, 0.0, 0.0 }.ToPython()),
+                xsecs: xsecs,
+                symmetric: true
+            );
+        }
+
+        // Создание поверхности управления (рули)
+        private dynamic CreateControlSurface(dynamic asb, dynamic np, dynamic pyBuiltins, dynamic airfoil, DataResults results)
+        {
+            dynamic xsecs = pyBuiltins.list();
+
+            // Корневое сечение
+            dynamic root_section = asb.WingXSec(
+                xyz_le: np.array(new[] { results.ControlPosition, 0.0, 0.0 }.ToPython()),
+                chord: results.Chord_Control,
+                twist: 0.0,
+                airfoil: airfoil
+            );
+
+
+
+            // Концевое сечение
+            dynamic tip_section = asb.WingXSec(
+                    xyz_le: np.array(new[] { results.ControlPosition, results.ControlSpan / 2, 0.0 }.ToPython()),
+                    chord: results.Chord_Control * 0.8,  // Сужение к концу
+                    twist: 0.0,
+                    airfoil: airfoil
+                );
+
+            xsecs.append(root_section);
+            xsecs.append(tip_section);
+
+            // Создание поверхности управления
+            return asb.Wing(
+                name: "Control Surface",
+                xyz_le: np.array(new[] { results.ControlPosition, 0.0, 0.0 }.ToPython()),
+                xsecs: xsecs,
+                symmetric: true
+            );
+        }
+
+        // Создание фюзеляжа на основе расчетных данных
+        private dynamic CreateFuselage(dynamic asb, dynamic np, dynamic pyBuiltins, DataResults results)
+        {
+            dynamic xsecs = pyBuiltins.list();
+
+            // Носовой конус (начало отсека с аппаратурой)
+            dynamic nose = asb.FuselageXSec(
+                xyz_c: np.array(new[] { 0.0, 0.0, 0.0 }.ToPython()),
+                radius: results.Diameter / 4  // Начало носа (узкая часть)
+            );
+
+            // Конец носовогоконуса (отсека с аппараутрой)
+            dynamic noseEnd = asb.FuselageXSec(
+                xyz_c: np.array(new[] { results.LengthAvionics, 0.0, 0.0 }.ToPython()),
+                radius: results.Diameter / 2
+            );
+
+            // Средняя часть (полезная нагрузка)
+            dynamic payloadSection = asb.FuselageXSec(
+                xyz_c: np.array(new[] { results.LengthAvionics + results.LengthPayload, 0.0, 0.0 }.ToPython()),
+                radius: results.Diameter / 2
+            );
+
+            // Топливный отсек
+            dynamic fuelSection = asb.FuselageXSec(
+                xyz_c: np.array(new[] { results.LengthAvionics + results.LengthPayload + results.LengthFuel, 0.0, 0.0 }.ToPython()),
+                radius: results.Diameter / 2
+            );
+
+            // Хвостовая часть (двигатель)
+            dynamic engineSection = asb.FuselageXSec(
+                xyz_c: np.array(new[] { results.LengthTotal, 0.0, 0.0 }.ToPython()),
+                radius: results.Diameter / 2
+            );
+
+            // Нулевое сечение в начале ( закрывает нос)
+            dynamic noseCap = asb.FuselageXSec(
+                xyz_c: np.array(new[] { -0.001, 0.0, 0.0 }.ToPython()),  // чуть перед началом
+                radius: 0.0  // нулевой радиус = закрыто
+            );
+
+            // Нулевое сечение в конце (закрывает хвост)
+            dynamic tailCap = asb.FuselageXSec(
+                    xyz_c: np.array(new[] { results.LengthTotal + 0.001, 0.0, 0.0 }.ToPython()),
+                    radius: 0.0
+                 );
+
+
+            xsecs.append(noseCap);
+            xsecs.append(nose);
+            xsecs.append(noseEnd);
+            xsecs.append(payloadSection);
+            xsecs.append(fuelSection);
+            xsecs.append(engineSection);
+            xsecs.append(tailCap);
+
+
+            // Создание фюзеляжа
+            return asb.Fuselage(
+                    name: "Main Fuselage",
+                    xyz_le: np.array(new[] { 0.0, 0.0, 0.0 }.ToPython()),
+                    xsecs: xsecs
+                );
+        }
+
+        // Метод для сохранения модели в файл
+        public void SaveModelToFile(string filePath)
+        {
+            using (Py.GIL())
+            {
+                try
+                {
+                    dynamic pickle = Py.Import("pickle");
+                    // Здесь должна быть логика сохранения модели
+                    // pickle.dump(airplane, open(filePath, "wb"));
+                    Console.WriteLine($"Модель сохранена в {filePath}");
+                }
+                catch (Exception ex)
+                {
+                   MessageBox.Show($"Ошибка при сохранении модели: {ex.Message}");
+                }
+            }
+        }
+
+    }
+}
