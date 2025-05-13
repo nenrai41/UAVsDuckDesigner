@@ -36,6 +36,9 @@ namespace UAVsDuckDesigner
         private dynamic pyBuiltins;
         private dynamic plt;
         private dynamic scipy;
+        private dynamic pickle;
+        private dynamic trimesh;
+        private dynamic os;
 
         private bool IsModulesOpen = false;
 
@@ -48,6 +51,9 @@ namespace UAVsDuckDesigner
                 pyBuiltins = Py.Import("builtins");
                 plt = Py.Import("matplotlib.pyplot");
                 scipy = Py.Import("scipy.integrate");
+                pickle = Py.Import("pickle");
+                trimesh = Py.Import("trimesh");
+                os = Py.Import("os");
                 IsModulesOpen = true;
             }
             
@@ -61,12 +67,18 @@ namespace UAVsDuckDesigner
                 plt.Dispose();     // Закрываем matplotlib.pyplot
                 scipy.Dispose();   // Закрываем scipy.integrate
                 pyBuiltins.Dispose(); // Закрываем builtins
+                pickle.Dispose();
+                trimesh.Dispose();
+                os.Dispose();
 
                 np = null;
                 asb = null;
                 plt = null;
                 scipy = null;
                 pyBuiltins = null;
+                pickle=null;
+                trimesh = null;
+                os = null;
 
                 GC.Collect(); // Принудительный вызов сборщика мусора
                 GC.WaitForPendingFinalizers(); // Ожидаем завершения финализации
@@ -128,11 +140,7 @@ namespace UAVsDuckDesigner
                 {
                     // Импорт модулей
                     ImportModules();
-                    //dynamic np = Py.Import("numpy");
-                    //dynamic asb = Py.Import("aerosandbox");
-                    //dynamic pyBuiltins = Py.Import("builtins");
-                    //dynamic plt = Py.Import("matplotlib.pyplot");
-                    //dynamic scipy = Py.Import("scipy.integrate");
+                    
 
                     // Создание профиля крыла
                     dynamic airfoilMainWing = asb.Airfoil(name: results.ProfileOfWingName);
@@ -175,18 +183,17 @@ namespace UAVsDuckDesigner
                     // Аэродинамический расчет
                     dynamic vlm = asb.VortexLatticeMethod(airplane: airplane, op_point: op_point);
                     dynamic aero_data = vlm.run();
+
                     results.CD = aero_data["CD"];
                     results.CL = aero_data["CL"];
-                    results.AerodynamicCenterOfControl = airplane.wings[1].aerodynamic_center()[0];
+                    
+                    
+                    //results.AerodynamicCenterOfControl = airplane.wings[1].aerodynamic_center()[0];
+                    
 
-
-                    // Вывод результатов аэродинамического расчета
-                    //Console.WriteLine($"Аэродинамические коэффициенты:");
-                    //Console.WriteLine($"CL = {aero_data["CL"]}");
-                    //Console.WriteLine($"CD = {aero_data["CD"]}");
-
-                    // Визуализация аэродинамической модели
+                    // Визуализация аэродинамической сетки
                     //vlm.draw();
+
                     CloseModules();
 
                 }
@@ -198,6 +205,7 @@ namespace UAVsDuckDesigner
                     {
                         MessageBox.Show($"Внутреннее исключение: {ex.InnerException.Message}");
                     }
+                    return;
                 }
             }
         }
@@ -336,23 +344,160 @@ namespace UAVsDuckDesigner
         }
 
         // Метод для сохранения модели в файл
-        public void SaveModelToFile(string filePath)
+        public void SaveModelToFile(string filePath, DataResults dataResults)
         {
             using (Py.GIL())
             {
                 try
                 {
-                    dynamic pickle = Py.Import("pickle");
-                    // Здесь должна быть логика сохранения модели
-                    // pickle.dump(airplane, open(filePath, "wb"));
-                    Console.WriteLine($"Модель сохранена в {filePath}");
+                    ImportModules();
+                    
+
+                    // Преобразуем путь в формат, который Python поймет правильно
+                    dynamic pyPath = os.path.normpath(filePath);
+                    //MessageBox.Show($"Нормализованный путь Python: {pyPath}");
+
+                    // Создаем список для хранения мешей
+                    dynamic meshes = pyBuiltins.list();
+                    int meshCount = 0;
+
+                    // Функция для обработки mesh_body результата
+                    void ProcessMeshResult(dynamic mesh_result)
+                    {
+                        try
+                        {
+                            // Проверяем, является ли результат кортежем
+                            bool isTuple = (bool)pyBuiltins.isinstance(mesh_result, pyBuiltins.tuple);
+                            if (isTuple)
+                            {
+                                // Если это кортеж, извлекаем вершины и грани
+                                dynamic vertices = mesh_result[0];
+                                dynamic faces = mesh_result[1];
+                                dynamic proper_mesh = trimesh.Trimesh(vertices: vertices, faces: faces);
+                                meshes.append(proper_mesh);
+                                meshCount++;
+                            }
+                            else
+                            {
+                                // Пытаемся получить доступ к vertices и faces как к свойствам
+                                try
+                                {
+                                    dynamic vertices = mesh_result.vertices;
+                                    dynamic faces = mesh_result.faces;
+                                    dynamic proper_mesh = trimesh.Trimesh(vertices: vertices, faces: faces);
+                                    meshes.append(proper_mesh);
+                                    meshCount++;
+                                }
+                                catch
+                                {
+                                    MessageBox.Show("Меш имеет неизвестный формат - ни кортеж, ни объект с vertices/faces");
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            MessageBox.Show($"Ошибка при обработке меша: {ex.Message}");
+                        }
+                    }
+
+                    // Остальной код остается таким же...
+                    // Получаем меш для каждого крыла
+                    try
+                    {
+                        if (dataResults.UAVs.wings != null)
+                        {
+                            foreach (var wingObj in dataResults.UAVs.wings)
+                            {
+                                try
+                                {
+                                    dynamic wing = wingObj;
+                                    dynamic mesh_result = wing.mesh_body();
+                                    ProcessMeshResult(mesh_result);
+                                }
+                                catch (Exception ex)
+                                {
+                                    MessageBox.Show($"Пропускаем крыло из-за ошибки: {ex.Message}");
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show($"Ошибка при обработке крыльев: {ex.Message}");
+                    }
+
+                    // Получаем меш для фюзеляжа
+                    try
+                    {
+                        if (dataResults.UAVs.fuselages != null)
+                        {
+                            foreach (var fuselageObj in dataResults.UAVs.fuselages)
+                            {
+                                try
+                                {
+                                    dynamic fuselage = fuselageObj;
+                                    dynamic mesh_result = fuselage.mesh_body();
+                                    ProcessMeshResult(mesh_result);
+                                }
+                                catch (Exception ex)
+                                {
+                                    Console.WriteLine($"Пропускаем фюзеляж из-за ошибки: {ex.Message}");
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show($"Ошибка при обработке фюзеляжей: {ex.Message}");
+                    }
+
+                    // Объединяем все меши
+                    //MessageBox.Show($"Найдено мешей: {meshCount}");
+
+                    if (meshCount == 0)
+                    {
+                        throw new Exception("Нет мешей для экспорта");
+                    }
+                    else if (meshCount == 1)
+                    {
+                        //MessageBox.Show("Экспортируем один меш напрямую");
+                        dynamic combined_mesh = meshes[0];
+                        combined_mesh.export(pyPath);
+                    }
+                    else
+                    {
+                        //Console.WriteLine($"Экспортируем {meshCount} мешей через Scene");
+                        dynamic scene = trimesh.Scene();
+
+                        foreach (var mesh in meshes)
+                        {
+                            scene.add_geometry(mesh);
+                        }
+
+                        try
+                        {
+                            scene.export(pyPath);
+                            MessageBox.Show("Экспорт успешно выполнен");
+                        }
+                        catch (Exception ex)
+                        {
+                            MessageBox.Show($"Ошибка при экспорте сцены: {ex.Message}");
+                            MessageBox.Show("Пробуем альтернативный метод экспорта...");
+                            dynamic combined = trimesh.util.concatenate(meshes);
+                            combined.export(pyPath);
+                        }
+                    }
+
+                    CloseModules();
                 }
                 catch (Exception ex)
                 {
-                   MessageBox.Show($"Ошибка при сохранении модели: {ex.Message}");
+                    MessageBox.Show($"Ошибка при сохранении модели: {ex.Message}");
+                    CloseModules();
                 }
             }
         }
+
 
     }
 }

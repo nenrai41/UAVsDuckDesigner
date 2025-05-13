@@ -9,6 +9,8 @@ namespace UAVsDuckDesigner
         public Form1()
         {
             InitializeComponent();
+            SaveModel_Dialog.InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+            SaveModel_Dialog.Title = "Сохранить файл";
             _asb = PythonAeroSandboxRunner.GetInstance();
             inputValidator = new InputValidator();
             _dataResults = new DataResults();
@@ -164,23 +166,62 @@ namespace UAVsDuckDesigner
 
         private void Calculations_Button_Click(object sender, EventArgs e)
         {
-            if(inputValidator.IsEnterTheRelativeMassesCorrectly(_dataProcessor, _asb))
+            if (inputValidator.IsEnterTheRelativeMassesCorrectly(_dataProcessor, _asb))
             {
                 _dataProcessor.Calculate(_dataResults);
                 _asb.CreateAndVisualizeAircraft(_dataResults);
-                new ResultsForm(_dataResults).Show();
             }
-            
         }
 
-        private void ProfileOfWingNames_TextBox_TextChanged(object sender, EventArgs e)
+
+
+
+
+        private void ShowResults_Button_Click(object sender, EventArgs e)
         {
-            inputValidator.ProfileOfWingName = ProfileOfWingNames_TextBox.Text;
+            var resultsWindow = new ResultForm();
+            resultsWindow.SetResults(_dataResults);
+            resultsWindow.Show();
         }
 
-        private void ProfileOfControlNames_TextBox_TextChanged(object sender, EventArgs e)
+        private void ProfileOfWingNames_ComboBox_SelectedIndexChanged(object sender, EventArgs e)
         {
-            inputValidator.ProfileOfControlName = ProfileOfControlNames_TextBox.Text;
+            inputValidator.ProfileOfWingName = ProfileOfWingNames_ComboBox.Text;
+        }
+
+        private void ProfileOfControlNames_ComboBox_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            inputValidator.ProfileOfControlName = ProfileOfControlNames_ComboBox.Text;
+        }
+
+        private void SaveModel_Dialog_FileOk(object sender, System.ComponentModel.CancelEventArgs e)
+        {
+
+        }
+
+        private void SaveModelBotton_Click(object sender, EventArgs e)
+        {
+            // Настройка диалога
+            SaveModel_Dialog.Filter = "STL files (*.stl)|*.stl|OBJ files (*.obj)|*.obj";
+            SaveModel_Dialog.DefaultExt = "stl";
+            SaveModel_Dialog.Title = "Сохранить модель AeroSandbox";
+
+            // Показываем диалог и проверяем результат
+            if (SaveModel_Dialog.ShowDialog() == DialogResult.OK)
+            {
+                // Получаем путь ТОЛЬКО после подтверждения
+                string filePath = SaveModel_Dialog.FileName;
+
+                try
+                {
+                    _asb.SaveModelToFile(filePath, _dataResults);
+                    MessageBox.Show($"Модель сохранена в:\n{filePath}", "Успех");
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Ошибка при сохранении:\n{ex.Message}", "Ошибка");
+                }
+            }
         }
     }
 }

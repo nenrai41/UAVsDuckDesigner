@@ -50,7 +50,7 @@ namespace UAVsDuckDesigner
         // Результаты ASB
         public double CD { get; set; } // Коэффициент сопротивлоения воздуха БПЛА
         public double CL { get; set; } // Коэффициент подъемной силы БПЛА
-        public double AerodynamicCenterOfControl { get; set; } //Аэродинамический центр рулей
+        //public double AerodynamicCenterOfControl { get; set; } //Аэродинамический центр рулей
 
         //Дублирующие свойства из DataProcessor
         public double Speed { get; set; } // Скорость полета (м/с)
@@ -85,8 +85,11 @@ namespace UAVsDuckDesigner
         public double EngineThrust { get; set; } // Тяга двигателя
         public double FuelConsumptionRate { get; set; } // Расход топлива двигателя
 
-        // Модель БПЛА в ASB
+        // Модель БПЛА в ASB 
         public dynamic UAVs { get; set; }
+
+        // Результаты vlm расчета 
+        public dynamic VLM { get; set; }
 
     }
 }
