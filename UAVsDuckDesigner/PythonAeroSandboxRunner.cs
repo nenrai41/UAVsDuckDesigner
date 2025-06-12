@@ -466,7 +466,7 @@ namespace UAVsDuckDesigner
                     }
                     else
                     {
-                        //Console.WriteLine($"Экспортируем {meshCount} мешей через Scene");
+                        //MessageBox.Show($"Экспортируем {meshCount} мешей через Scene");
                         dynamic scene = trimesh.Scene();
 
                         foreach (var mesh in meshes)
