@@ -173,10 +173,6 @@ namespace UAVsDuckDesigner
             }
         }
 
-
-
-
-
         private void ShowResults_Button_Click(object sender, EventArgs e)
         {
             var resultsWindow = new ResultForm();

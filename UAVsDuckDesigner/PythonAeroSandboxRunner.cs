@@ -187,10 +187,8 @@ namespace UAVsDuckDesigner
                     results.CD = aero_data["CD"];
                     results.CL = aero_data["CL"];
                     
-                    
                     //results.AerodynamicCenterOfControl = airplane.wings[1].aerodynamic_center()[0];
                     
-
                     // Визуализация аэродинамической сетки
                     //vlm.draw();
 
@@ -255,8 +253,6 @@ namespace UAVsDuckDesigner
                 twist: 0.0,
                 airfoil: airfoil
             );
-
-
 
             // Концевое сечение
             dynamic tip_section = asb.WingXSec(
@@ -352,8 +348,7 @@ namespace UAVsDuckDesigner
                 {
                     ImportModules();
                     
-
-                    // Преобразуем путь в формат, который Python поймет правильно
+                    // Преобразуем путь
                     dynamic pyPath = os.path.normpath(filePath);
                     //MessageBox.Show($"Нормализованный путь Python: {pyPath}");
 
@@ -400,7 +395,7 @@ namespace UAVsDuckDesigner
                         }
                     }
 
-                    // Остальной код остается таким же...
+                    
                     // Получаем меш для каждого крыла
                     try
                     {
